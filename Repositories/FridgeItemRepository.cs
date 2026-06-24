@@ -44,12 +44,10 @@ public class FridgeItemRepository(AppDbContext db) : IFridgeItemRepository
 
     public Task<List<FridgeItem>> GetWastedInMonthAsync(string userId, int month, int year, CancellationToken ct = default)
     {
-        var start = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var end = start.AddMonths(1);
         return db.FridgeItems
             .Where(x => x.UserId == userId
                      && (x.Status == ItemStatus.Expired || x.Status == ItemStatus.Wasted)
-                     && x.ExpiryDate >= start && x.ExpiryDate < end)
+                     && x.ExpiryDate.Month == month && x.ExpiryDate.Year == year)
             .ToListAsync(ct);
     }
 
