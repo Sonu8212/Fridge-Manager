@@ -1,17 +1,18 @@
+using ErrorOr;
+using FridgeManager.Api.Common;
 using FridgeManager.Api.DTOs;
-using FridgeManager.Api.Models;
 
 namespace FridgeManager.Api.Services;
 
 public interface IFridgeItemService
 {
-    Task<List<FridgeItemResponseDto>> GetAllAsync();
-    Task<FridgeItemResponseDto?> GetByIdAsync(int id);
-    Task<FridgeItemResponseDto> CreateAsync(CreateFridgeItemDto dto);
-    Task<FridgeItemResponseDto?> UpdateAsync(int id, UpdateFridgeItemDto dto);
-    Task<bool> DeleteAsync(int id);
-    Task<FridgeItemResponseDto?> MarkAsUsedAsync(int id, MarkUsedDto dto);
-    Task<WastageReportDto> GetWastageReportAsync(int month, int year);
-    Task<List<ForecastDto>> GetForecastAsync();
-    Task<List<FridgeItemResponseDto>> GetExpiringItemsAsync(int withinDays = 7);
+    Task<PagedResult<FridgeItemResponseDto>> GetAllAsync(int page, int pageSize, CancellationToken ct = default);
+    Task<ErrorOr<FridgeItemResponseDto>> GetByIdAsync(int id, CancellationToken ct = default);
+    Task<FridgeItemResponseDto> CreateAsync(CreateFridgeItemDto dto, CancellationToken ct = default);
+    Task<ErrorOr<FridgeItemResponseDto>> UpdateAsync(int id, UpdateFridgeItemDto dto, CancellationToken ct = default);
+    Task<ErrorOr<Deleted>> DeleteAsync(int id, CancellationToken ct = default);
+    Task<ErrorOr<FridgeItemResponseDto>> MarkAsUsedAsync(int id, MarkUsedDto dto, CancellationToken ct = default);
+    Task<WastageReportDto> GetWastageReportAsync(int month, int year, CancellationToken ct = default);
+    Task<List<ForecastDto>> GetForecastAsync(CancellationToken ct = default);
+    Task<List<FridgeItemResponseDto>> GetExpiringItemsAsync(int withinDays = 7, CancellationToken ct = default);
 }

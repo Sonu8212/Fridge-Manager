@@ -15,8 +15,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<FridgeItem>(e =>
         {
             e.Property(x => x.CostPerUnit).HasPrecision(18, 2);
-            e.Property(x => x.TotalCost).HasPrecision(18, 2);
             e.Property(x => x.Quantity).HasPrecision(18, 3);
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => x.ExpiryDate);
         });
 
         modelBuilder.Entity<ConsumptionLog>(e =>

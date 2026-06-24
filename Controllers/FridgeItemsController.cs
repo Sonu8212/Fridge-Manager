@@ -1,69 +1,82 @@
+using Asp.Versioning;
 using FridgeManager.Api.DTOs;
 using FridgeManager.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FridgeManager.Api.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
-public class FridgeItemsController(IFridgeItemService service, IRecipeService recipeService) : ControllerBase
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/fridge-items")]
+public class FridgeItemsController(IFridgeItemService service, IRecipeService recipeService) : ApiController
 {
     [HttpGet]
-    public async Task<IActionResult> GetAll() => Ok(await service.GetAllAsync());
-
-    [HttpGet("{id}")]
-    public async Task<IActionResult> GetById(int id)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken ct = default)
     {
-        var item = await service.GetByIdAsync(id);
-        return item is null ? NotFound() : Ok(item);
+        if (page < 1 || pageSize < 1 || pageSize > 100)
+            return BadRequest("Page must be >= 1 and pageSize must be between 1 and 100.");
+
+        return Ok(await service.GetAllAsync(page, pageSize, ct));
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<IActionResult> GetById(int id, CancellationToken ct = default)
+    {
+        var result = await service.GetByIdAsync(id, ct);
+        return result.Match(Ok, Problem);
     }
 
     [HttpGet("expiring")]
-    public async Task<IActionResult> GetExpiring([FromQuery] int withinDays = 7)
-        => Ok(await service.GetExpiringItemsAsync(withinDays));
+    public async Task<IActionResult> GetExpiring([FromQuery] int withinDays = 7, CancellationToken ct = default)
+        => Ok(await service.GetExpiringItemsAsync(withinDays, ct));
 
     [HttpGet("expiring/recipes")]
-    public async Task<IActionResult> GetRecipesForExpiring([FromQuery] int withinDays = 7)
+    public async Task<IActionResult> GetRecipesForExpiring([FromQuery] int withinDays = 7, CancellationToken ct = default)
     {
-        var expiring = await service.GetExpiringItemsAsync(withinDays);
-        var ingredients = expiring.Select(x => x.Name).ToList();
-        var recipes = await recipeService.SuggestRecipesAsync(ingredients);
+        var expiring = await service.GetExpiringItemsAsync(withinDays, ct);
+        var recipes = await recipeService.SuggestRecipesAsync(expiring.Select(x => x.Name).ToList());
         return Ok(recipes);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create(CreateFridgeItemDto dto)
+    public async Task<IActionResult> Create(CreateFridgeItemDto dto, CancellationToken ct = default)
     {
-        var item = await service.CreateAsync(dto);
-        return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
+        var item = await service.CreateAsync(dto, ct);
+        return CreatedAtAction(nameof(GetById), new { version = "1.0", id = item.Id }, item);
     }
 
-    [HttpPut("{id}")]
-    public async Task<IActionResult> Update(int id, UpdateFridgeItemDto dto)
+    [HttpPut("{id:int}")]
+    public async Task<IActionResult> Update(int id, UpdateFridgeItemDto dto, CancellationToken ct = default)
     {
-        var item = await service.UpdateAsync(id, dto);
-        return item is null ? NotFound() : Ok(item);
+        var result = await service.UpdateAsync(id, dto, ct);
+        return result.Match(Ok, Problem);
     }
 
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> Delete(int id)
-        => await service.DeleteAsync(id) ? NoContent() : NotFound();
-
-    [HttpPost("{id}/mark-used")]
-    public async Task<IActionResult> MarkUsed(int id, MarkUsedDto dto)
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct = default)
     {
-        var item = await service.MarkAsUsedAsync(id, dto);
-        return item is null ? NotFound() : Ok(item);
+        var result = await service.DeleteAsync(id, ct);
+        return result.Match(_ => NoContent(), Problem);
     }
 
-    [HttpGet("report/wastage")]
-    public async Task<IActionResult> GetWastageReport([FromQuery] int month, [FromQuery] int year)
+    [HttpPost("{id:int}/mark-used")]
+    public async Task<IActionResult> MarkUsed(int id, MarkUsedDto dto, CancellationToken ct = default)
+    {
+        var result = await service.MarkAsUsedAsync(id, dto, ct);
+        return result.Match(Ok, Problem);
+    }
+
+    [HttpGet("reports/wastage")]
+    public async Task<IActionResult> GetWastageReport([FromQuery] int month, [FromQuery] int year, CancellationToken ct = default)
     {
         if (month < 1 || month > 12) return BadRequest("Month must be between 1 and 12.");
-        return Ok(await service.GetWastageReportAsync(month, year));
+        if (year < 2000 || year > DateTime.UtcNow.Year) return BadRequest("Invalid year.");
+        return Ok(await service.GetWastageReportAsync(month, year, ct));
     }
 
     [HttpGet("forecast")]
-    public async Task<IActionResult> GetForecast()
-        => Ok(await service.GetForecastAsync());
+    public async Task<IActionResult> GetForecast(CancellationToken ct = default)
+        => Ok(await service.GetForecastAsync(ct));
 }
