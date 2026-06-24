@@ -1,11 +1,17 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace FridgeManager.Api.Hubs;
 
+[Authorize]
 public class NotificationHub : Hub
 {
-    public async Task JoinUser(string userId)
+    public override async Task OnConnectedAsync()
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, userId);
+        var userId = Context.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is not null)
+            await Groups.AddToGroupAsync(Context.ConnectionId, userId);
+        await base.OnConnectedAsync();
     }
 }

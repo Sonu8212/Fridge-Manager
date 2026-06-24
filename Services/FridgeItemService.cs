@@ -15,23 +15,23 @@ public class FridgeItemService(
     ILogger<FridgeItemService> logger,
     AppDbContext db) : IFridgeItemService
 {
-    public async Task<PagedResult<FridgeItemResponseDto>> GetAllAsync(int page, int pageSize, CancellationToken ct = default)
+    public async Task<PagedResult<FridgeItemResponseDto>> GetAllAsync(string userId, int page, int pageSize, CancellationToken ct = default)
     {
-        var (items, total) = await repository.GetPagedAsync(page, pageSize, ct);
-        var dtos = items.Select(x => MapToResponse(x, dateTime.UtcNow)).ToList();
-        return new PagedResult<FridgeItemResponseDto>(dtos, total, page, pageSize);
+        var (items, total) = await repository.GetPagedAsync(userId, page, pageSize, ct);
+        return new PagedResult<FridgeItemResponseDto>(items.Select(x => MapToResponse(x, dateTime.UtcNow)).ToList(), total, page, pageSize);
     }
 
-    public async Task<ErrorOr<FridgeItemResponseDto>> GetByIdAsync(int id, CancellationToken ct = default)
+    public async Task<ErrorOr<FridgeItemResponseDto>> GetByIdAsync(string userId, int id, CancellationToken ct = default)
     {
-        var item = await repository.GetByIdAsync(id, ct);
+        var item = await repository.GetByIdAsync(id, userId, ct);
         return item is null ? Errors.FridgeItem.NotFound(id) : MapToResponse(item, dateTime.UtcNow);
     }
 
-    public async Task<FridgeItemResponseDto> CreateAsync(CreateFridgeItemDto dto, CancellationToken ct = default)
+    public async Task<FridgeItemResponseDto> CreateAsync(string userId, CreateFridgeItemDto dto, CancellationToken ct = default)
     {
         var item = new FridgeItem
         {
+            UserId = userId,
             Name = dto.Name,
             Category = dto.Category,
             Quantity = dto.Quantity,
@@ -43,15 +43,14 @@ public class FridgeItemService(
             CreatedAt = dateTime.UtcNow,
             UpdatedAt = dateTime.UtcNow
         };
-
         await repository.AddAsync(item, ct);
-        logger.LogInformation("Created fridge item {ItemId} ({Name})", item.Id, item.Name);
+        logger.LogInformation("User {UserId} created item {ItemId} ({Name})", userId, item.Id, item.Name);
         return MapToResponse(item, dateTime.UtcNow);
     }
 
-    public async Task<ErrorOr<FridgeItemResponseDto>> UpdateAsync(int id, UpdateFridgeItemDto dto, CancellationToken ct = default)
+    public async Task<ErrorOr<FridgeItemResponseDto>> UpdateAsync(string userId, int id, UpdateFridgeItemDto dto, CancellationToken ct = default)
     {
-        var item = await repository.GetByIdAsync(id, ct);
+        var item = await repository.GetByIdAsync(id, userId, ct);
         if (item is null) return Errors.FridgeItem.NotFound(id);
 
         item.Name = dto.Name;
@@ -64,23 +63,21 @@ public class FridgeItemService(
         item.UpdatedAt = dateTime.UtcNow;
 
         await repository.SaveChangesAsync(ct);
-        logger.LogInformation("Updated fridge item {ItemId}", id);
         return MapToResponse(item, dateTime.UtcNow);
     }
 
-    public async Task<ErrorOr<Deleted>> DeleteAsync(int id, CancellationToken ct = default)
+    public async Task<ErrorOr<Deleted>> DeleteAsync(string userId, int id, CancellationToken ct = default)
     {
-        var item = await repository.GetByIdAsync(id, ct);
+        var item = await repository.GetByIdAsync(id, userId, ct);
         if (item is null) return Errors.FridgeItem.NotFound(id);
-
         await repository.DeleteAsync(item, ct);
-        logger.LogInformation("Deleted fridge item {ItemId}", id);
+        logger.LogInformation("User {UserId} deleted item {ItemId}", userId, id);
         return Result.Deleted;
     }
 
-    public async Task<ErrorOr<FridgeItemResponseDto>> MarkAsUsedAsync(int id, MarkUsedDto dto, CancellationToken ct = default)
+    public async Task<ErrorOr<FridgeItemResponseDto>> MarkAsUsedAsync(string userId, int id, MarkUsedDto dto, CancellationToken ct = default)
     {
-        var item = await repository.GetByIdAsync(id, ct);
+        var item = await repository.GetByIdAsync(id, userId, ct);
         if (item is null) return Errors.FridgeItem.NotFound(id);
         if (item.Status == ItemStatus.Used) return Errors.FridgeItem.AlreadyUsed;
         if (dto.QuantityUsed > item.Quantity) return Errors.FridgeItem.QuantityExceedsStock(item.Quantity);
@@ -100,70 +97,49 @@ public class FridgeItemService(
         {
             item.Quantity = 0;
             item.Status = ItemStatus.Used;
-            await shoppingList.AutoAddAsync(item, ct);
-            logger.LogInformation("Item {ItemId} fully consumed. Auto-added to shopping list.", id);
+            await shoppingList.AutoAddAsync(userId, item, ct);
+            logger.LogInformation("Item {ItemId} fully consumed by user {UserId}. Auto-added to shopping list.", id, userId);
         }
 
         await repository.SaveChangesAsync(ct);
         return MapToResponse(item, dateTime.UtcNow);
     }
 
-    public async Task<WastageReportDto> GetWastageReportAsync(int month, int year, CancellationToken ct = default)
+    public async Task<WastageReportDto> GetWastageReportAsync(string userId, int month, int year, CancellationToken ct = default)
     {
-        var wastedItems = await repository.GetWastedInMonthAsync(month, year, ct);
-
+        var items = await repository.GetWastedInMonthAsync(userId, month, year, ct);
         return new WastageReportDto(
             month, year,
-            wastedItems.Count(x => x.Status == ItemStatus.Expired),
-            wastedItems.Count(x => x.Status == ItemStatus.Wasted),
-            wastedItems.Sum(x => x.CostPerUnit * x.Quantity),
-            wastedItems.Select(x => new WastageItemDto(
-                x.Name, x.Category, x.Quantity, x.Unit,
-                x.CostPerUnit * x.Quantity, x.ExpiryDate)).ToList()
+            items.Count(x => x.Status == ItemStatus.Expired),
+            items.Count(x => x.Status == ItemStatus.Wasted),
+            items.Sum(x => x.CostPerUnit * x.Quantity),
+            items.Select(x => new WastageItemDto(x.Name, x.Category, x.Quantity, x.Unit, x.CostPerUnit * x.Quantity, x.ExpiryDate)).ToList()
         );
     }
 
-    public async Task<List<ForecastDto>> GetForecastAsync(CancellationToken ct = default)
+    public async Task<List<ForecastDto>> GetForecastAsync(string userId, CancellationToken ct = default)
     {
         var thirtyDaysAgo = dateTime.UtcNow.AddDays(-30);
 
         var forecast = await db.ConsumptionLogs
-            .Where(x => x.UsedAt >= thirtyDaysAgo)
-            .GroupBy(x => new
-            {
-                x.FridgeItem.Name,
-                x.FridgeItem.Category,
-                x.FridgeItem.Unit,
-                x.FridgeItem.CostPerUnit
-            })
-            .Select(g => new
-            {
-                g.Key.Name,
-                g.Key.Category,
-                g.Key.Unit,
-                g.Key.CostPerUnit,
-                TotalUsed = g.Sum(x => x.QuantityUsed)
-            })
+            .Where(x => x.FridgeItem.UserId == userId && x.UsedAt >= thirtyDaysAgo)
+            .GroupBy(x => new { x.FridgeItem.Name, x.FridgeItem.Category, x.FridgeItem.Unit, x.FridgeItem.CostPerUnit })
+            .Select(g => new { g.Key.Name, g.Key.Category, g.Key.Unit, g.Key.CostPerUnit, TotalUsed = g.Sum(x => x.QuantityUsed) })
             .ToListAsync(ct);
 
         return forecast.Select(g =>
         {
-            var avgWeekly = g.TotalUsed / 4m;
-            var avgMonthly = g.TotalUsed;
-            return new ForecastDto(
-                g.Name, g.Category, g.Unit,
-                avgWeekly, avgMonthly,
-                Math.Ceiling(avgWeekly * 1.1m),
-                Math.Ceiling(avgMonthly * 1.1m),
-                Math.Round(avgWeekly * 1.1m * g.CostPerUnit, 2),
-                Math.Round(avgMonthly * 1.1m * g.CostPerUnit, 2)
-            );
+            var weekly = g.TotalUsed / 4m;
+            return new ForecastDto(g.Name, g.Category, g.Unit, weekly, g.TotalUsed,
+                Math.Ceiling(weekly * 1.1m), Math.Ceiling(g.TotalUsed * 1.1m),
+                Math.Round(weekly * 1.1m * g.CostPerUnit, 2),
+                Math.Round(g.TotalUsed * 1.1m * g.CostPerUnit, 2));
         }).ToList();
     }
 
-    public async Task<List<FridgeItemResponseDto>> GetExpiringItemsAsync(int withinDays = 7, CancellationToken ct = default)
+    public async Task<List<FridgeItemResponseDto>> GetExpiringItemsAsync(string userId, int withinDays = 7, CancellationToken ct = default)
     {
-        var items = await repository.GetExpiringAsync(withinDays, ct);
+        var items = await repository.GetExpiringAsync(userId, withinDays, ct);
         return items.Select(x => MapToResponse(x, dateTime.UtcNow)).ToList();
     }
 

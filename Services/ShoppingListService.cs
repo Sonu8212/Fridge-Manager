@@ -11,16 +11,17 @@ public class ShoppingListService(
     IDateTimeProvider dateTime,
     ILogger<ShoppingListService> logger) : IShoppingListService
 {
-    public async Task<List<ShoppingItemResponseDto>> GetAllAsync(CancellationToken ct = default)
+    public async Task<List<ShoppingItemResponseDto>> GetAllAsync(string userId, CancellationToken ct = default)
     {
-        var items = await repository.GetPendingAsync(ct);
+        var items = await repository.GetPendingAsync(userId, ct);
         return items.Select(MapToResponse).ToList();
     }
 
-    public async Task<ShoppingItemResponseDto> AddAsync(CreateShoppingItemDto dto, CancellationToken ct = default)
+    public async Task<ShoppingItemResponseDto> AddAsync(string userId, CreateShoppingItemDto dto, CancellationToken ct = default)
     {
         var item = new ShoppingListItem
         {
+            UserId = userId,
             Name = dto.Name,
             Category = dto.Category,
             Quantity = dto.Quantity,
@@ -29,19 +30,19 @@ public class ShoppingListService(
             IsAutoAdded = false,
             CreatedAt = dateTime.UtcNow
         };
-
         await repository.AddAsync(item, ct);
-        logger.LogInformation("Manually added {Name} to shopping list", dto.Name);
+        logger.LogInformation("User {UserId} manually added {Name} to shopping list", userId, dto.Name);
         return MapToResponse(item);
     }
 
-    public async Task AutoAddAsync(FridgeItem fridgeItem, CancellationToken ct = default)
+    public async Task AutoAddAsync(string userId, FridgeItem fridgeItem, CancellationToken ct = default)
     {
-        var exists = await repository.ExistsByNameAsync(fridgeItem.Name, ct);
+        var exists = await repository.ExistsByNameAsync(userId, fridgeItem.Name, ct);
         if (exists) return;
 
-        var item = new ShoppingListItem
+        await repository.AddAsync(new ShoppingListItem
         {
+            UserId = userId,
             Name = fridgeItem.Name,
             Category = fridgeItem.Category,
             Quantity = fridgeItem.Quantity == 0 ? 1 : fridgeItem.Quantity,
@@ -49,27 +50,23 @@ public class ShoppingListService(
             EstimatedCost = fridgeItem.CostPerUnit,
             IsAutoAdded = true,
             CreatedAt = dateTime.UtcNow
-        };
-
-        await repository.AddAsync(item, ct);
-        logger.LogInformation("Auto-added {Name} to shopping list after full consumption", fridgeItem.Name);
+        }, ct);
+        logger.LogInformation("Auto-added {Name} to shopping list for user {UserId}", fridgeItem.Name, userId);
     }
 
-    public async Task<ErrorOr<Updated>> MarkPurchasedAsync(int id, CancellationToken ct = default)
+    public async Task<ErrorOr<Updated>> MarkPurchasedAsync(string userId, int id, CancellationToken ct = default)
     {
-        var item = await repository.GetByIdAsync(id, ct);
+        var item = await repository.GetByIdAsync(id, userId, ct);
         if (item is null) return Errors.ShoppingItem.NotFound(id);
-
         item.IsPurchased = true;
         await repository.SaveChangesAsync(ct);
         return Result.Updated;
     }
 
-    public async Task<ErrorOr<Deleted>> DeleteAsync(int id, CancellationToken ct = default)
+    public async Task<ErrorOr<Deleted>> DeleteAsync(string userId, int id, CancellationToken ct = default)
     {
-        var item = await repository.GetByIdAsync(id, ct);
+        var item = await repository.GetByIdAsync(id, userId, ct);
         if (item is null) return Errors.ShoppingItem.NotFound(id);
-
         await repository.DeleteAsync(item, ct);
         return Result.Deleted;
     }

@@ -1,9 +1,11 @@
 using FridgeManager.Api.Models;
+using FridgeManager.Api.Models.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace FridgeManager.Api.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public class AppDbContext(DbContextOptions<AppDbContext> options) : IdentityDbContext<ApplicationUser>(options)
 {
     public DbSet<FridgeItem> FridgeItems => Set<FridgeItem>();
     public DbSet<ConsumptionLog> ConsumptionLogs => Set<ConsumptionLog>();
@@ -12,6 +14,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder); // required for Identity tables
+
         modelBuilder.Entity<FridgeItem>(e =>
         {
             e.Property(x => x.CostPerUnit).HasPrecision(18, 2);

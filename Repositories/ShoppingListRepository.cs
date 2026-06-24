@@ -6,14 +6,14 @@ namespace FridgeManager.Api.Repositories;
 
 public class ShoppingListRepository(AppDbContext db) : IShoppingListRepository
 {
-    public Task<List<ShoppingListItem>> GetPendingAsync(CancellationToken ct = default) =>
-        db.ShoppingListItems.Where(x => !x.IsPurchased).OrderBy(x => x.CreatedAt).ToListAsync(ct);
+    public Task<List<ShoppingListItem>> GetPendingAsync(string userId, CancellationToken ct = default) =>
+        db.ShoppingListItems.Where(x => x.UserId == userId && !x.IsPurchased).OrderBy(x => x.CreatedAt).ToListAsync(ct);
 
-    public Task<ShoppingListItem?> GetByIdAsync(int id, CancellationToken ct = default) =>
-        db.ShoppingListItems.FindAsync([id], ct).AsTask();
+    public Task<ShoppingListItem?> GetByIdAsync(int id, string userId, CancellationToken ct = default) =>
+        db.ShoppingListItems.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
 
-    public Task<bool> ExistsByNameAsync(string name, CancellationToken ct = default) =>
-        db.ShoppingListItems.AnyAsync(x => x.Name == name && !x.IsPurchased, ct);
+    public Task<bool> ExistsByNameAsync(string userId, string name, CancellationToken ct = default) =>
+        db.ShoppingListItems.AnyAsync(x => x.UserId == userId && x.Name == name && !x.IsPurchased, ct);
 
     public async Task AddAsync(ShoppingListItem item, CancellationToken ct = default)
     {

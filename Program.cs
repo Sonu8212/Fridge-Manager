@@ -1,9 +1,11 @@
+using System.Text;
 using Asp.Versioning;
 using FridgeManager.Api.Common;
 using FridgeManager.Api.Data;
 using FridgeManager.Api.Hubs;
 using FridgeManager.Api.Jobs;
 using FridgeManager.Api.Middleware;
+using FridgeManager.Api.Models.Identity;
 using FridgeManager.Api.Repositories;
 using FridgeManager.Api.Services;
 using FridgeManager.Api.Validators;
@@ -11,7 +13,11 @@ using FluentValidation;
 using FluentValidation.AspNetCore;
 using Hangfire;
 using Hangfire.SqlServer;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Serilog;
 
 Log.Logger = new LoggerConfiguration()
@@ -31,6 +37,53 @@ try
     // Database
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+    // Identity
+    builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
+    {
+        options.User.RequireUniqueEmail = true;
+        options.SignIn.RequireConfirmedEmail = true;
+        options.Password.RequireDigit = true;
+        options.Password.RequiredLength = 8;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireNonAlphanumeric = true;
+    })
+    .AddEntityFrameworkStores<AppDbContext>()
+    .AddDefaultTokenProviders();
+
+    // JWT Authentication
+    var jwtSecret = builder.Configuration["Jwt:Secret"]!;
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            ClockSkew = TimeSpan.Zero
+        };
+
+        // allow JWT from SignalR query string
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                var token = ctx.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(token) && ctx.Request.Path.StartsWithSegments("/hubs"))
+                    ctx.Token = token;
+                return Task.CompletedTask;
+            }
+        };
+    });
 
     // Hangfire
     builder.Services.AddHangfire(config => config
@@ -54,9 +107,9 @@ try
     // Services
     builder.Services.AddScoped<IShoppingListService, ShoppingListService>();
     builder.Services.AddScoped<IFridgeItemService, FridgeItemService>();
+    builder.Services.AddScoped<ITokenService, TokenService>();
+    builder.Services.AddScoped<IEmailService, EmailService>();
     builder.Services.AddScoped<ExpiryCheckJob>();
-
-    // Common
     builder.Services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
 
     // FluentValidation
@@ -71,7 +124,7 @@ try
                   .AllowAnyMethod()
                   .AllowCredentials()));
 
-    // API versioning
+    // API Versioning
     builder.Services.AddApiVersioning(options =>
     {
         options.DefaultApiVersion = new ApiVersion(1, 0);
@@ -89,17 +142,32 @@ try
 
     builder.Services.AddControllers();
     builder.Services.AddEndpointsApiExplorer();
+
+    // Swagger with JWT support
     builder.Services.AddSwaggerGen(c =>
     {
         c.SwaggerDoc("v1", new() { Title = "FridgeManager API", Version = "v1" });
+        c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Description = "JWT Authorization header. Enter: Bearer {your_token}",
+            Name = "Authorization",
+            In = ParameterLocation.Header,
+            Type = SecuritySchemeType.ApiKey,
+            Scheme = "Bearer"
+        });
+        c.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
+            {
+                new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
+                []
+            }
+        });
     });
 
     var app = builder.Build();
 
-    // Global exception handling (before anything else)
     app.UseMiddleware<ExceptionHandlingMiddleware>();
 
-    // Migrate only in development; in production use CI/CD pipeline
     if (app.Environment.IsDevelopment())
     {
         using var scope = app.Services.CreateScope();
@@ -112,6 +180,8 @@ try
 
     app.UseSerilogRequestLogging();
     app.UseCors("Frontend");
+
+    app.UseAuthentication();
     app.UseAuthorization();
 
     app.MapControllers();
